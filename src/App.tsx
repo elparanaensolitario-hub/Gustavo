@@ -69,6 +69,71 @@ export default function App() {
   const [selectedBook, setSelectedBook] = useState<number | null>(null);
   const [copiedStates, setCopiedStates] = useState<{[key: string]: boolean}>({});
 
+  // Estado para capturar imágenes subidas por el usuario interactivamente (tanto de localStorage como del servidor)
+  const [covers, setCovers] = useState({
+    parana_es: localStorage.getItem('cover_parana_es') || '',
+    parana_en: localStorage.getItem('cover_parana_en') || '',
+    iara: localStorage.getItem('cover_iara') || '',
+    ingenieria_es: localStorage.getItem('cover_ingenieria_es') || '',
+    ingenieria_en: localStorage.getItem('cover_ingenieria_en') || '',
+    trilogia_es: localStorage.getItem('cover_trilogia_es') || '',
+    trilogia_en: localStorage.getItem('cover_trilogia_en') || '',
+  });
+
+  const [serverCovers, setServerCovers] = useState<{[key: string]: boolean}>({});
+  const [showAdmin, setShowAdmin] = useState(false);
+
+  React.useEffect(() => {
+    // 1. Detectar si entramos de forma administrativa
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('gustavo') || params.has('admin') || params.has('editor') || params.has('edit')) {
+      setShowAdmin(true);
+    }
+
+    // 2. Consultar qué portadas personalizadas están guardadas físicamente en el servidor
+    fetch('/api/custom-covers')
+      .then(res => {
+        if (!res.ok) throw new Error("HTTP state " + res.status);
+        return res.json();
+      })
+      .then(data => {
+        if (data && typeof data === 'object') {
+          setServerCovers(data);
+        }
+      })
+      .catch(err => console.error("Could not fetch server covers", err));
+  }, []);
+
+  const handleImageUpload = (key: string, file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result;
+      if (typeof result === 'string') {
+        // 1. Guardar localmente para feedback inmediato
+        localStorage.setItem(`cover_${key}`, result);
+        setCovers(prev => ({ ...prev, [key]: result }));
+
+        // 2. Subir físicamente al servidor en segundo plano
+        fetch('/api/upload-cover', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ key, base64: result })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.success) {
+            console.log("Cover replicated successfully to server!");
+            setServerCovers(prev => ({ ...prev, [key]: true }));
+          }
+        })
+        .catch(err => console.error("Error uploading cover to container backend", err));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const copiarAlPortapapeles = (texto: string, key: string) => {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(texto)
@@ -119,11 +184,35 @@ export default function App() {
 
   const t = textos[lang];
 
+  // Nombres de archivos estáticos mapeados para no-caché en el servidor
+  const serverFilenames = {
+    parana_es: 'parana_es.jpg',
+    parana_en: 'parana_en.jpg',
+    iara: 'iara.jpg',
+    ingenieria_es: 'ingenieria_es.jpg',
+    ingenieria_en: 'ingenieria_en.jpg',
+    trilogia_es: 'trilogia_es.jpg',
+    trilogia_en: 'trilogia_en.jpg'
+  };
+
+  const getCoverSrc = (key: keyof typeof serverFilenames, fallback: string) => {
+    // A. Prioridad 1: LocalStorage del usuario que sube
+    if (covers[key]) {
+      return covers[key];
+    }
+    // B. Prioridad 2: Archivo físico servido por el servidor
+    if (serverCovers[key]) {
+      return `/custom-covers/${serverFilenames[key]}`;
+    }
+    // C. Prioridad 3: Fallback de Vite
+    return fallback;
+  };
+
   // Las portadas maestras fijas que importamos directamente desde el código
-  const img1Src = lang === 'es' ? paranaEs : paranaEn;
-  const img2Src = iaraCover;
-  const img3Src = lang === 'es' ? ingenieriaEs : ingenieriaEn;
-  const img4Src = lang === 'es' ? trilogiaEs : trilogiaEn;
+  const img1Src = lang === 'es' ? getCoverSrc('parana_es', paranaEs) : getCoverSrc('parana_en', paranaEn);
+  const img2Src = getCoverSrc('iara', iaraCover);
+  const img3Src = lang === 'es' ? getCoverSrc('ingenieria_es', ingenieriaEs) : getCoverSrc('ingenieria_en', ingenieriaEn);
+  const img4Src = lang === 'es' ? getCoverSrc('trilogia_es', trilogiaEs) : getCoverSrc('trilogia_en', trilogiaEn);
 
   // Aplicar idioma
   const aplicarIdioma = (newLang: 'es' | 'en') => {
@@ -221,24 +310,6 @@ export default function App() {
               {t.btnComprar}
             </button>
           </div>
-
-          <div className="seccion-redes">
-            <div id="txt-social" className="titulo-redes">{t.txtSocial}</div>
-            <div className="social-footer">
-              <a href="https://www.youtube.com/@GustavoDipr%C3%A9" target="_blank" rel="noopener noreferrer" className="social-icon" title="YouTube">
-                <i className="fab fa-youtube"></i>
-              </a>
-              <a href="https://www.instagram.com/elparanaensolitario" target="_blank" rel="noopener noreferrer" className="social-icon" title="Instagram">
-                <i className="fab fa-instagram"></i>
-              </a>
-              <a href="https://www.tiktok.com/@elparanaensolitario" target="_blank" rel="noopener noreferrer" className="social-icon" title="TikTok">
-                <i className="fab fa-tiktok"></i>
-              </a>
-              <a href="https://www.facebook.com/elparanaensolitario" target="_blank" rel="noopener noreferrer" className="social-icon" title="Facebook">
-                <i className="fab fa-facebook"></i>
-              </a>
-            </div>
-          </div>
         </div>
       )}
 
@@ -292,6 +363,25 @@ export default function App() {
           </button>
         </div>
       )}
+
+      {/* REDES SOCIALES GLOBALES (SIEMPRE VISIBLES ABAJO) */}
+      <div className="seccion-redes">
+        <div id="txt-social" className="titulo-redes">{t.txtSocial}</div>
+        <div className="social-footer">
+          <a href="https://www.youtube.com/@GustavoDipr%C3%A9" target="_blank" rel="noopener noreferrer" className="social-icon" title="YouTube">
+            <i className="fab fa-youtube"></i>
+          </a>
+          <a href="https://www.instagram.com/elparanaensolitario" target="_blank" rel="noopener noreferrer" className="social-icon" title="Instagram">
+            <i className="fab fa-instagram"></i>
+          </a>
+          <a href="https://www.tiktok.com/@elparanaensolitario" target="_blank" rel="noopener noreferrer" className="social-icon" title="TikTok">
+            <i className="fab fa-tiktok"></i>
+          </a>
+          <a href="https://www.facebook.com/elparanaensolitario" target="_blank" rel="noopener noreferrer" className="social-icon" title="Facebook">
+            <i className="fab fa-facebook"></i>
+          </a>
+        </div>
+      </div>
 
       {/* MODAL DE PAGO */}
       {activeModal === 'pago' && selectedBook !== null && (
@@ -838,6 +928,183 @@ export default function App() {
                   </p>
               </div>
           </div>
+        </div>
+      )}
+
+      {/* PANEL DE CONTROL DE PORTADAS DE GUSTAVO */}
+      {showAdmin && (
+        <div style={{
+          marginTop: '50px',
+          padding: '28px',
+          backgroundColor: '#111614',
+          borderRadius: '16px',
+          border: '1.5px solid #2a3831',
+          color: '#eae3d5',
+          fontSize: '0.95rem',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
+          textAlign: 'left',
+          width: '100%',
+          maxWidth: '1000px',
+          margin: '50px auto 0 auto'
+        }}>
+          <h3 style={{ margin: '0 0 10px 0', color: '#ff9d42', fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold' }}>
+            <span>⚙️</span> {lang === 'es' ? 'Panel de Autogestión de Portadas' : 'Covers Management Panel'}
+          </h3>
+          <p style={{ margin: '0 0 25px 0', fontSize: '0.88rem', color: '#8da499', lineHeight: '1.6' }}>
+            {lang === 'es' 
+              ? 'Hola Gustavo, este panel es exclusivo para que cargues tus portadas desde tu computadora. Al subirlas, se guardarán tanto en tu navegador actual como de forma física y permanente en el servidor, garantizando que tu sobrina y cualquier persona en el mundo las vean correctamente.'
+              : 'Hi Gustavo, this panel is exclusive for you to upload your covers. By uploading them, they will be saved both in your current browser and permanently on the server, ensuring your niece and anyone else in the world sees them correctly.'}
+          </p>
+          
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+            gap: '20px',
+            marginBottom: '25px'
+          }}>
+            {/* El Parana ES */}
+            <div style={{ background: '#1c2622', padding: '16px', borderRadius: '12px', border: '1px solid #2a3831' }}>
+              <span style={{ fontWeight: '600', fontSize: '0.85rem', display: 'block', marginBottom: '10px', color: '#ff9d42' }}>
+                📙 El Paraná en Solitario (Español)
+              </span>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={(e) => e.target.files?.[0] && handleImageUpload('parana_es', e.target.files[0])}
+                style={{ fontSize: '0.8rem', width: '100%', color: '#8da499' }}
+              />
+              {covers.parana_es && <div style={{ color: '#2e7d32', fontSize: '0.75rem', marginTop: '5px' }}>✓ Cargada localmente</div>}
+              {serverCovers.parana_es && <div style={{ color: '#ff9d42', fontSize: '0.75rem', marginTop: '2px' }}>✓ Sincronizada con el Servidor</div>}
+            </div>
+
+            {/* El Parana EN */}
+            <div style={{ background: '#1c2622', padding: '16px', borderRadius: '12px', border: '1px solid #2a3831' }}>
+              <span style={{ fontWeight: '600', fontSize: '0.85rem', display: 'block', marginBottom: '10px', color: '#ff9d42' }}>
+                📘 The Paraná in Solitude (Inglés)
+              </span>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={(e) => e.target.files?.[0] && handleImageUpload('parana_en', e.target.files[0])}
+                style={{ fontSize: '0.8rem', width: '100%', color: '#8da499' }}
+              />
+              {covers.parana_en && <div style={{ color: '#2e7d32', fontSize: '0.75rem', marginTop: '5px' }}>✓ Cargada localmente</div>}
+              {serverCovers.parana_en && <div style={{ color: '#ff9d42', fontSize: '0.75rem', marginTop: '2px' }}>✓ Sincronizada con el Servidor</div>}
+            </div>
+
+            {/* El Mandarina, Iara y Gus */}
+            <div style={{ background: '#1c2622', padding: '16px', borderRadius: '12px', border: '1px solid #2a3831' }}>
+              <span style={{ fontWeight: '600', fontSize: '0.85rem', display: 'block', marginBottom: '10px', color: '#ff9d42' }}>
+                🟢 El Mandarina, Iara y Gus (Fábula)
+              </span>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={(e) => e.target.files?.[0] && handleImageUpload('iara', e.target.files[0])}
+                style={{ fontSize: '0.8rem', width: '100%', color: '#8da499' }}
+              />
+              {covers.iara && <div style={{ color: '#2e7d32', fontSize: '0.75rem', marginTop: '5px' }}>✓ Cargada localmente</div>}
+              {serverCovers.iara && <div style={{ color: '#ff9d42', fontSize: '0.75rem', marginTop: '2px' }}>✓ Sincronizada con el Servidor</div>}
+            </div>
+
+            {/* Ingenieria ES */}
+            <div style={{ background: '#1c2622', padding: '16px', borderRadius: '12px', border: '1px solid #2a3831' }}>
+              <span style={{ fontWeight: '600', fontSize: '0.85rem', display: 'block', marginBottom: '10px', color: '#ff9d42' }}>
+                📙 Ingeniería Inversa (Español)
+              </span>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={(e) => e.target.files?.[0] && handleImageUpload('ingenieria_es', e.target.files[0])}
+                style={{ fontSize: '0.8rem', width: '100%', color: '#8da499' }}
+              />
+              {covers.ingenieria_es && <div style={{ color: '#2e7d32', fontSize: '0.75rem', marginTop: '5px' }}>✓ Cargada localmente</div>}
+              {serverCovers.ingenieria_es && <div style={{ color: '#ff9d42', fontSize: '0.75rem', marginTop: '2px' }}>✓ Sincronizada con el Servidor</div>}
+            </div>
+
+            {/* Ingenieria EN */}
+            <div style={{ background: '#1c2622', padding: '16px', borderRadius: '12px', border: '1px solid #2a3831' }}>
+              <span style={{ fontWeight: '600', fontSize: '0.85rem', display: 'block', marginBottom: '10px', color: '#ff9d42' }}>
+                📘 Reverse Engineering (Inglés)
+              </span>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={(e) => e.target.files?.[0] && handleImageUpload('ingenieria_en', e.target.files[0])}
+                style={{ fontSize: '0.8rem', width: '100%', color: '#8da499' }}
+              />
+              {covers.ingenieria_en && <div style={{ color: '#2e7d32', fontSize: '0.75rem', marginTop: '5px' }}>✓ Cargada localmente</div>}
+              {serverCovers.ingenieria_en && <div style={{ color: '#ff9d42', fontSize: '0.75rem', marginTop: '2px' }}>✓ Sincronizada con el Servidor</div>}
+            </div>
+
+            {/* Trilogia ES */}
+            <div style={{ background: '#1c2622', padding: '16px', borderRadius: '12px', border: '1px solid #2a3831' }}>
+              <span style={{ fontWeight: '600', fontSize: '0.85rem', display: 'block', marginBottom: '10px', color: '#ff9d42' }}>
+                📙 Combo Trilogía (Español)
+              </span>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={(e) => e.target.files?.[0] && handleImageUpload('trilogia_es', e.target.files[0])}
+                style={{ fontSize: '0.8rem', width: '100%', color: '#8da499' }}
+              />
+              {covers.trilogia_es && <div style={{ color: '#2e7d32', fontSize: '0.75rem', marginTop: '5px' }}>✓ Cargada localmente</div>}
+              {serverCovers.trilogia_es && <div style={{ color: '#ff9d42', fontSize: '0.75rem', marginTop: '2px' }}>✓ Sincronizada con el Servidor</div>}
+            </div>
+
+            {/* Trilogia EN */}
+            <div style={{ background: '#1c2622', padding: '16px', borderRadius: '12px', border: '1px solid #2a3831' }}>
+              <span style={{ fontWeight: '600', fontSize: '0.85rem', display: 'block', marginBottom: '10px', color: '#ff9d42' }}>
+                📘 Combo Trilogy (Inglés)
+              </span>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={(e) => e.target.files?.[0] && handleImageUpload('trilogia_en', e.target.files[0])}
+                style={{ fontSize: '0.8rem', width: '100%', color: '#8da499' }}
+              />
+              {covers.trilogia_en && <div style={{ color: '#2e7d32', fontSize: '0.75rem', marginTop: '5px' }}>✓ Cargada localmente</div>}
+              {serverCovers.trilogia_en && <div style={{ color: '#ff9d42', fontSize: '0.75rem', marginTop: '2px' }}>✓ Sincronizada con el Servidor</div>}
+            </div>
+          </div>
+
+          <button 
+            onClick={() => {
+              if (confirm(lang === 'es' ? '¿Estás seguro de que quieres restablecer todas las portadas a sus valores de fábrica en tu navegador?' : 'Are you sure you want to reset all covers in your browser?')) {
+                localStorage.removeItem('cover_parana_es');
+                localStorage.removeItem('cover_parana_en');
+                localStorage.removeItem('cover_iara');
+                localStorage.removeItem('cover_ingenieria_es');
+                localStorage.removeItem('cover_ingenieria_en');
+                localStorage.removeItem('cover_trilogia_es');
+                localStorage.removeItem('cover_trilogia_en');
+                setCovers({
+                  parana_es: '',
+                  parana_en: '',
+                  iara: '',
+                  ingenieria_es: '',
+                  ingenieria_en: '',
+                  trilogia_es: '',
+                  trilogia_en: '',
+                });
+              }
+            }}
+            style={{
+              background: 'transparent',
+              color: '#e74c3c',
+              border: '1px solid #e74c3c',
+              padding: '10px 20px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontWeight: '600',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#e74c3c'; e.currentTarget.style.color = '#fff'; }}
+            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#e74c3c'; }}
+          >
+            {lang === 'es' ? 'Restablecer Portadas en mi Navegador' : 'Reset My Browser Covers'}
+          </button>
         </div>
       )}
 
