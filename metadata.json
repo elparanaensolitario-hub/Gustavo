@@ -1,0 +1,6 @@
+{
+  "name": "El Paraná en solitario",
+  "description": "Sitio de venta de libros por Gustavo Cristian Dipré. Una historia de coraje y naturaleza.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
